@@ -97,12 +97,18 @@ class YaPublicUserId(IdTypeInfoAggregator):
     def get_zen_info(self) -> dict:
         return self.simple_get_info_request(f'https://zen.yandex.ru/user/{self.identifier}')
 
+    def get_market_info(self) -> dict:
+        return self.simple_get_info_request(f'https://market.yandex.ru/user/{self.identifier}/reviews')
+
 
 def main():
     if len(sys.argv) > 1:
         username = sys.argv[1]
     else:
-        username = input('Enter Yandex profile username (email name before @yandex): ')
+        username = input('Enter Yandex username / login / email: ')
+
+    username = username.split('@')[0]
+    print(f'Get info about {username}...')
 
     username_obj = YaUsername(username)
     username_obj.collect()
