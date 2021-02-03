@@ -1,27 +1,45 @@
 #!/usr/bin/env python3
+import json
+import os
 import sys
+from http.cookiejar import MozillaCookieJar
 
 import requests
-from socid_extractor import extract, parse_cookies
+from socid_extractor import extract
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36',
 }
 
-COOKIES_STR = ''
+COOKIES_FILENAME = 'cookies.txt'
+
+
+def load_cookies(filename):
+    cookies = {}
+    if os.path.exists(filename):
+        cookies_obj = MozillaCookieJar(filename)
+        cookies_obj.load(ignore_discard=False, ignore_expires=False)
+
+        for domain in cookies_obj._cookies.values():
+            for cookie_dict in list(domain.values()):
+                for _, cookie in cookie_dict.items():
+                    cookies[cookie.name] = cookie.value
+
+    return cookies
 
 
 class IdTypeInfoAggregator:
-    def __init__(self, identifier: str):
-        if not self.validate_id(identifier):
-            raise ValueError
+    acceptable_fields = ()
+
+    def __init__(self, identifier: str, cookies: dict):
         self.identifier = identifier
+        self.cookies = cookies
         self.info = {}
         self.sites_results = {}
 
-    def validate_id(self, identifier):
-        # TODO: id validation
-        return True
+    @classmethod
+    def validate_id(cls, name, identifier):
+        return name in cls.acceptable_fields
 
     def aggregate(self, info: dict):
         for k, v in info.items():
@@ -33,10 +51,10 @@ class IdTypeInfoAggregator:
             else:
                 self.info[k] = v
 
-    def simple_get_info_request(self, url: str, headers_updates: dict={}, orig_url: str=None) -> dict:
+    def simple_get_info_request(self, url: str, headers_updates: dict = {}, orig_url: str = None) -> dict:
         headers = dict(HEADERS)
         headers.update(headers_updates)
-        r = requests.get(url, headers=headers, cookies=parse_cookies(COOKIES_STR))
+        r = requests.get(url, headers=headers, cookies=self.cookies)
         if 'enter_captcha_value' in r.text:
             info = {'Error': 'Captcha detected'}
         else:
@@ -54,7 +72,7 @@ class IdTypeInfoAggregator:
 
     def print(self):
         for sitename, data in self.sites_results.items():
-            print('Yandex.' + sitename.capitalize())
+            print('[+] Yandex.' + sitename.capitalize())
             if not data:
                 print('\tNot found.\n')
                 continue
@@ -68,6 +86,8 @@ class IdTypeInfoAggregator:
 
 
 class YaUsername(IdTypeInfoAggregator):
+    acceptable_fields = ('username',)
+
     def get_collections_info(self) -> dict:
         return self.simple_get_info_request(
             url=f'https://yandex.ru/collections/api/users/{self.identifier}',
@@ -86,8 +106,24 @@ class YaUsername(IdTypeInfoAggregator):
     def get_bugbounty_info(self) -> dict:
         return self.simple_get_info_request(f'https://yandex.ru/bugbounty/researchers/{self.identifier}/')
 
+    def get_messenger_info(self) -> dict:
+        url = 'https://yandex.ru/messenger/api/registry/api/'
+        data = {"method": "search",
+                "params": {"query": self.identifier, "limit": 10, "entities": ["messages", "users_and_chats"]}}
+        r = requests.post(url, headers=HEADERS, cookies=self.cookies, files={'request': (None, json.dumps(data))})
+        info = extract(r.text)
+        if info and info.get('yandex_messenger_guid'):
+            info['URL'] = f'https://yandex.ru/chat#/user/{info["yandex_messenger_guid"]}'
+        return info
+
 
 class YaPublicUserId(IdTypeInfoAggregator):
+    acceptable_fields = ('yandex_public_id', 'id',)
+
+    @classmethod
+    def validate_id(cls, name, identifier):
+        return len(identifier) == 26 and name in cls.acceptable_fields
+
     def get_reviews_info(self) -> dict:
         return self.simple_get_info_request(f'https://reviews.yandex.ru/user/{self.identifier}')
 
@@ -101,25 +137,59 @@ class YaPublicUserId(IdTypeInfoAggregator):
         return self.simple_get_info_request(f'https://market.yandex.ru/user/{self.identifier}/reviews')
 
 
+class YaMessengerGuid(IdTypeInfoAggregator):
+    acceptable_fields = ('yandex_messenger_guid',)
+
+    @classmethod
+    def validate_id(cls, name, identifier):
+        return len(identifier) == 36 and '-' in identifier and name in cls.acceptable_fields
+
+    def get_messenger_info(self) -> dict:
+        url = 'https://yandex.ru/messenger/api/registry/api/'
+        data = {"method": "get_users_data", "params": {"guids": [self.identifier]}}
+        r = requests.post(url, headers=HEADERS, cookies=self.cookies, files={'request': (None, json.dumps(data))})
+        info = extract(r.text)
+        if info:
+            info['URL'] = f'https://yandex.ru/chat#/user/{self.identifier}'
+        return info
+
+
+def crawl(user_data: dict, cookies={}, checked_values=[]):
+    entities = (YaUsername, YaPublicUserId, YaMessengerGuid)
+
+    for k, v in user_data.items():
+        values = list(v) if isinstance(v, set) else [v]
+        for value in values:
+            if value in checked_values:
+                continue
+
+            for e in entities:
+                if not e.validate_id(k, value):
+                    continue
+
+                checked_values.append(value)
+
+                print(f'[*] Get info by {k} `{value}`...\n')
+                entity_obj = e(value, cookies)
+                entity_obj.collect()
+                entity_obj.print()
+
+                crawl(entity_obj.info, cookies, checked_values)
+
+
 def main():
     if len(sys.argv) > 1:
         username = sys.argv[1]
     else:
         username = input('Enter Yandex username / login / email: ')
 
-    username = username.split('@')[0]
-    print(f'Get info about {username}...')
+    cookies = load_cookies(COOKIES_FILENAME)
+    if not cookies:
+        print(f'Cookies not found, but are required for some sites. See README to learn how to use cookies.')
 
-    username_obj = YaUsername(username)
-    username_obj.collect()
-    username_obj.print()
+    user_data = {'username': username.split('@')[0]}
 
-    public_id = username_obj.info.get('yandex_public_id')
-
-    if public_id:
-        public_id_obj = YaPublicUserId(public_id)
-        public_id_obj.collect()
-        public_id_obj.print()
+    crawl(user_data, cookies)
 
 
 if __name__ == '__main__':
