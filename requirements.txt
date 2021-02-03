@@ -1,1 +1,1 @@
-socid-extractor>=0.0.7
+socid-extractor>=0.0.8
