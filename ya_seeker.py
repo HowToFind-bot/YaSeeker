@@ -67,12 +67,13 @@ class IdTypeInfoAggregator:
         for f in self.__dir__():
             if f.startswith('get_'):
                 info = getattr(self, f)()
-                self.sites_results[f.split('_')[1]] = info
+                name = ' '.join(f.split('_')[1:-1])
+                self.sites_results[name] = info
                 self.aggregate(info)
 
     def print(self):
         for sitename, data in self.sites_results.items():
-            print('[+] Yandex.' + sitename.capitalize())
+            print('[+] Yandex.' + sitename[0].upper() + sitename[1:])
             if not data:
                 print('\tNot found.\n')
                 continue
@@ -88,7 +89,7 @@ class IdTypeInfoAggregator:
 class YaUsername(IdTypeInfoAggregator):
     acceptable_fields = ('username',)
 
-    def get_collections_info(self) -> dict:
+    def get_collections_API_info(self) -> dict:
         return self.simple_get_info_request(
             url=f'https://yandex.ru/collections/api/users/{self.identifier}',
             orig_url=f'https://yandex.ru/collections/user/{self.identifier}/'
@@ -106,7 +107,7 @@ class YaUsername(IdTypeInfoAggregator):
     def get_bugbounty_info(self) -> dict:
         return self.simple_get_info_request(f'https://yandex.ru/bugbounty/researchers/{self.identifier}/')
 
-    def get_messenger_info(self) -> dict:
+    def get_messenger_search_info(self) -> dict:
         url = 'https://yandex.ru/messenger/api/registry/api/'
         data = {"method": "search",
                 "params": {"query": self.identifier, "limit": 10, "entities": ["messages", "users_and_chats"]}}
@@ -116,6 +117,9 @@ class YaUsername(IdTypeInfoAggregator):
             info['URL'] = f'https://yandex.ru/chat#/user/{info["yandex_messenger_guid"]}'
         return info
 
+    def get_music_API_info(self) -> dict:
+        return self.simple_get_info_request(f'https://api.music.yandex.net/users/{self.identifier}')
+
 
 class YaPublicUserId(IdTypeInfoAggregator):
     acceptable_fields = ('yandex_public_id', 'id',)
@@ -123,6 +127,12 @@ class YaPublicUserId(IdTypeInfoAggregator):
     @classmethod
     def validate_id(cls, name, identifier):
         return len(identifier) == 26 and name in cls.acceptable_fields
+
+    def get_collections_API_info(self) -> dict:
+        return self.simple_get_info_request(
+            url=f'https://yandex.ru/collections/api/users/{self.identifier}',
+            orig_url=f'https://yandex.ru/collections/user/{self.identifier}/'
+        )
 
     def get_reviews_info(self) -> dict:
         return self.simple_get_info_request(f'https://reviews.yandex.ru/user/{self.identifier}')
