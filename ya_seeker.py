@@ -146,6 +146,9 @@ class YaPublicUserId(IdTypeInfoAggregator):
     def get_market_info(self) -> dict:
         return self.simple_get_info_request(f'https://market.yandex.ru/user/{self.identifier}/reviews')
 
+    def get_o_info(self) -> dict:
+        return self.simple_get_info_request(f'http://o.yandex.ru/profile/{self.identifier}/')
+
 
 class YaMessengerGuid(IdTypeInfoAggregator):
     acceptable_fields = ('yandex_messenger_guid',)
@@ -188,16 +191,20 @@ def crawl(user_data: dict, cookies={}, checked_values=[]):
 
 
 def main():
+    identifier_type = 'username'
+
     if len(sys.argv) > 1:
-        username = sys.argv[1]
+        identifier = sys.argv[1]
+        if len(sys.argv) > 2:
+            identifier_type = sys.argv[2]
     else:
-        username = input('Enter Yandex username / login / email: ')
+        identifier = input('Enter Yandex username / login / email: ')
 
     cookies = load_cookies(COOKIES_FILENAME)
     if not cookies:
         print(f'Cookies not found, but are required for some sites. See README to learn how to use cookies.')
 
-    user_data = {'username': username.split('@')[0]}
+    user_data = {identifier_type: identifier.split('@')[0]}
 
     crawl(user_data, cookies)
 
