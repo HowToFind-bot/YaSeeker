@@ -55,10 +55,16 @@ class IdTypeInfoAggregator:
         headers = dict(HEADERS)
         headers.update(headers_updates)
         r = requests.get(url, headers=headers, cookies=self.cookies)
+
         if 'enter_captcha_value' in r.text:
             info = {'Error': 'Captcha detected'}
         else:
-            info = extract(r.text)
+            try:
+                info = extract(r.text)
+            except Exception as e:
+                print(f'Error for URL {url}: {e}\n')
+                info = {}
+
             if info:
                 info['URL'] = orig_url or url
         return info
