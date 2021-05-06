@@ -51,9 +51,9 @@ class IdTypeInfoAggregator:
             else:
                 self.info[k] = v
 
-    def simple_get_info_request(self, url: str, headers_updates: dict = {}, orig_url: str = None) -> dict:
+    def simple_get_info_request(self, url: str, headers_updates: dict = None, orig_url: str = None) -> dict:
         headers = dict(HEADERS)
-        headers.update(headers_updates)
+        headers.update(headers_updates if headers_updates else {})
         r = requests.get(url, headers=headers, cookies=self.cookies)
 
         if 'enter_captcha_value' in r.text:
@@ -173,9 +173,12 @@ class YaMessengerGuid(IdTypeInfoAggregator):
         return info
 
 
-def crawl(user_data: dict, cookies={}, checked_values=[]):
+def crawl(user_data: dict, cookies: dict = None, checked_values: list = None):
     entities = (YaUsername, YaPublicUserId, YaMessengerGuid)
-
+    if cookies is None:
+        cookies = {}
+    if checked_values is None:
+        checked_values = []
     for k, v in user_data.items():
         values = list(v) if isinstance(v, set) else [v]
         for value in values:
